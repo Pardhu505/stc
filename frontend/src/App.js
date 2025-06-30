@@ -183,7 +183,7 @@ const Footer = () => {
 };
 
 // Login Component
-const Login = ({ onSwitchToSignup }) => {
+const Login = ({ onSwitchToSignup, onSwitchToForgotPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -333,12 +333,325 @@ const Login = ({ onSwitchToSignup }) => {
             Create Account
           </button>
         </div>
+
+        <div className="text-center mt-4">
+          <button
+            onClick={onSwitchToForgotPassword}
+            className="text-sm text-purple-600 hover:text-purple-700 transition-all duration-200"
+          >
+            Forgot Password?
+          </button>
+        </div>
+
       </motion.div>
       
       <Footer />
     </div>
   );
 };
+
+// RequestPasswordResetPage Component
+const RequestPasswordResetPage = ({ onSwitchToLogin }) => {
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage('');
+    setError('');
+
+    try {
+      const response = await axios.post(`${API}/auth/request-password-reset`, { email });
+      setMessage(response.data.message);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to request password reset. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={`min-h-screen ${
+      isDark
+        ? 'bg-gradient-to-br from-gray-900 to-gray-800'
+        : 'bg-gradient-to-br from-purple-50 to-blue-50'
+    } flex flex-col items-center justify-center p-4`}>
+      <motion.div
+        initial="initial"
+        animate="in"
+        exit="out"
+        variants={pageVariants}
+        transition={pageTransition}
+        className={`${
+          isDark ? 'bg-gray-800 text-white' : 'bg-white'
+        } rounded-2xl shadow-xl p-8 w-full max-w-md relative`}
+      >
+        <button
+          onClick={toggleTheme}
+          className={`absolute top-4 right-4 p-2 rounded-lg ${
+            isDark
+              ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          } transition-all duration-200`}
+        >
+          {isDark ? '☀️' : '🌙'}
+        </button>
+
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold">Reset Password</h1>
+          <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} mt-2`}>
+            Enter your email to receive a reset link.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label className={`block text-sm font-medium ${
+              isDark ? 'text-gray-300' : 'text-gray-700'
+            } mb-2`}>
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={`w-full px-4 py-3 border ${
+                isDark
+                  ? 'border-gray-600 bg-gray-700 text-white'
+                  : 'border-gray-300 bg-white'
+              } rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200`}
+              placeholder="Enter your email"
+              required
+            />
+          </div>
+
+          {message && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-green-600 text-sm text-center bg-green-50 p-3 rounded-lg"
+            >
+              {message}
+            </motion.div>
+          )}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-lg"
+            >
+              {error}
+            </motion.div>
+          )}
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            type="submit"
+            disabled={loading}
+            className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 transition duration-200 disabled:opacity-50"
+          >
+            {loading ? 'Sending...' : '📧 Send Reset Link'}
+          </motion.button>
+        </form>
+
+        <div className="text-center mt-6">
+          <button
+            onClick={onSwitchToLogin}
+            className="text-purple-600 hover:text-purple-700 font-medium transition-all duration-200"
+          >
+            Back to Login
+          </button>
+        </div>
+      </motion.div>
+      <Footer />
+    </div>
+  );
+};
+
+// ResetPasswordPage Component
+const ResetPasswordPage = ({ onSwitchToLogin }) => {
+  const [token, setToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    // Extract token from URL query parameter
+    const queryParams = new URLSearchParams(window.location.search);
+    const tokenFromURL = queryParams.get('token');
+    if (tokenFromURL) {
+      setToken(tokenFromURL);
+    } else {
+      setError("No reset token found in URL. Please use the link from your email.");
+    }
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 6) {
+        setError('Password must be at least 6 characters long.');
+        return;
+    }
+    if (!token) {
+        setError('Reset token is missing.');
+        return;
+    }
+
+    setLoading(true);
+    setMessage('');
+    setError('');
+
+    try {
+      const response = await axios.post(`${API}/auth/reset-password`, { token, new_password: newPassword });
+      setMessage(response.data.message + " You can now login with your new password.");
+      // Optionally clear the token from URL after successful reset, though redirecting is better
+      // window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to reset password. The token might be invalid or expired.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={`min-h-screen ${
+      isDark
+        ? 'bg-gradient-to-br from-gray-900 to-gray-800'
+        : 'bg-gradient-to-br from-purple-50 to-blue-50'
+    } flex flex-col items-center justify-center p-4`}>
+      <motion.div
+        initial="initial"
+        animate="in"
+        exit="out"
+        variants={pageVariants}
+        transition={pageTransition}
+        className={`${
+          isDark ? 'bg-gray-800 text-white' : 'bg-white'
+        } rounded-2xl shadow-xl p-8 w-full max-w-md relative`}
+      >
+        <button
+          onClick={toggleTheme}
+          className={`absolute top-4 right-4 p-2 rounded-lg ${
+            isDark
+              ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          } transition-all duration-200`}
+        >
+          {isDark ? '☀️' : '🌙'}
+        </button>
+
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold">Set New Password</h1>
+        </div>
+
+        {!token && error && (
+           <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-lg mb-4"
+            >
+              {error}
+            </motion.div>
+        )}
+
+        {token && (
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label className={`block text-sm font-medium ${
+                isDark ? 'text-gray-300' : 'text-gray-700'
+              } mb-2`}>
+                New Password
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className={`w-full px-4 py-3 border ${
+                  isDark
+                    ? 'border-gray-600 bg-gray-700 text-white'
+                    : 'border-gray-300 bg-white'
+                } rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200`}
+                placeholder="Enter new password"
+                required
+              />
+            </div>
+            <div>
+              <label className={`block text-sm font-medium ${
+                isDark ? 'text-gray-300' : 'text-gray-700'
+              } mb-2`}>
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className={`w-full px-4 py-3 border ${
+                  isDark
+                    ? 'border-gray-600 bg-gray-700 text-white'
+                    : 'border-gray-300 bg-white'
+                } rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200`}
+                placeholder="Confirm new password"
+                required
+              />
+            </div>
+
+            {message && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-green-600 text-sm text-center bg-green-50 p-3 rounded-lg"
+              >
+                {message}
+              </motion.div>
+            )}
+            {error && !message && ( // Show error only if no success message
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-600 text-sm text-center bg-red-50 p-3 rounded-lg"
+              >
+                {error}
+              </motion.div>
+            )}
+
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              type="submit"
+              disabled={loading || !!message} // Disable if loading or success message shown
+              className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 transition duration-200 disabled:opacity-50"
+            >
+              {loading ? 'Resetting...' : '🔒 Reset Password'}
+            </motion.button>
+          </form>
+        )}
+
+        <div className="text-center mt-6">
+          <button
+            onClick={onSwitchToLogin}
+            className="text-purple-600 hover:text-purple-700 font-medium transition-all duration-200"
+          >
+            Back to Login
+          </button>
+        </div>
+      </motion.div>
+      <Footer />
+    </div>
+  );
+};
+
 
 // Signup Component
 const Signup = ({ onSwitchToLogin }) => {
@@ -929,16 +1242,19 @@ const DailyReport = () => {
   };
 
   const getManagers = () => {
-    // For managers, they should report to Anant Tiwari or Alimpan Banerjee
+    // If the current user IS a manager, they are submitting their OWN report.
+    // In this context, their "Reporting Manager" is their senior manager/reviewer.
     if (user?.role === 'manager') {
       return ['Anant Tiwari', 'Alimpan Banerjee'];
     }
     
-    // For employees, use the department/team structure
+    // If the current user is an EMPLOYEE, they select their actual reporting manager from the department/team structure.
     if (!selectedDepartment || !selectedTeam || !departments || 
         !departments[selectedDepartment] || !departments[selectedDepartment][selectedTeam]) {
+      // This case is for an employee when department/team data might still be loading or not selected.
       return [];
     }
+    // For an employee, list managers from their selected team.
     return departments[selectedDepartment][selectedTeam] || [];
   };
 
@@ -1902,9 +2218,9 @@ const TeamReport = () => {
 const SummaryReport = () => {
   const { token } = useAuth();
   const { isDark } = useTheme();
-  const [reports, setReports] = useState([]);
+  const [groupedReports, setGroupedReports] = useState([]); // Changed state variable name
   const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState({});
+  const [departments, setDepartments] = useState({}); // For filter dropdown
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
@@ -1935,12 +2251,14 @@ const SummaryReport = () => {
         params.append('department', selectedDepartment);
       }
 
-      const response = await axios.get(`${API}/work-reports?${params.toString()}`, {
+      // Call the new endpoint for grouped summary data
+      const response = await axios.get(`${API}/summary-reports-grouped?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setReports(response.data.reports);
+      setGroupedReports(response.data.reports); // Assuming backend sends { reports: [...] }
     } catch (error) {
-      console.error('Error fetching reports:', error);
+      console.error('Error fetching grouped summary reports:', error);
+      setGroupedReports([]); // Clear data on error
     } finally {
       setLoading(false);
     }
@@ -1976,85 +2294,78 @@ const SummaryReport = () => {
     if (selectedDepartment) {
       doc.text(`Department: ${selectedDepartment}`, 14, 56);
     }
-    
-    // Summary statistics
-    const completedTasks = reports.reduce((acc, report) => 
-      acc + report.tasks.filter(task => task.status === 'Completed').length, 0);
-    const wipTasks = reports.reduce((acc, report) => 
-      acc + report.tasks.filter(task => task.status === 'WIP').length, 0);
-    const delayedTasks = reports.reduce((acc, report) => 
-      acc + report.tasks.filter(task => task.status === 'Delayed').length, 0);
-    const yetToStartTasks = reports.reduce((acc, report) => 
-      acc + report.tasks.filter(task => task.status === 'Yet to Start').length, 0);
-    
-    let currentY = selectedDepartment ? 70 : 62;
-    
+    let currentY = selectedDepartment ? 70 : 62; // Keep similar starting Y
+
+    // Updated Summary Statistics (if any, or remove)
+    // For now, let's just show total groups. More complex stats can be added if needed.
     doc.setFont('helvetica', 'bold');
-    doc.text('Summary Statistics:', 14, currentY);
+    doc.text('Report Summary:', 14, currentY);
     currentY += 8;
-    
     doc.setFont('helvetica', 'normal');
-    doc.text(`Total Reports: ${reports.length}`, 14, currentY);
-    doc.text(`Completed Tasks: ${completedTasks}`, 70, currentY);
-    currentY += 8;
-    doc.text(`WIP Tasks: ${wipTasks}`, 14, currentY);
-    doc.text(`Delayed Tasks: ${delayedTasks}`, 70, currentY);
-    if (yetToStartTasks > 0) {
-      currentY += 8;
-      doc.text(`Yet to Start Tasks: ${yetToStartTasks}`, 14, currentY);
-    }
-    
+    doc.text(`Total Manager Groups: ${groupedReports.length}`, 14, currentY);
     currentY += 15;
-    
-    // Detailed reports table
+
+    // New table data based on groupedReports
     const tableData = [];
-    reports.forEach(report => {
-      if (report.tasks && report.tasks.length > 0) {
-        report.tasks.forEach((task, taskIndex) => {
-          tableData.push([
-            report.date,
-            report.employee_name,
-            report.department,
-            report.team,
-            report.reporting_manager,
-            task.details,
-            task.status
-          ]);
-        });
-      }
+    groupedReports.forEach(group => {
+      // Join tasks and statuses with newline for bullet-point like appearance in PDF cell
+      const tasksString = group.tasks_list.map(task => `- ${task}`).join('\n');
+      const statusesString = group.statuses_list.map(status => `- ${status}`).join('\n');
+
+      tableData.push([
+        group.department,
+        group.team,
+        group.reporting_manager,
+        group.no_of_resource.toString(),
+        tasksString,
+        statusesString,
+        group.reviewer || 'N/A'
+      ]);
     });
     
     if (tableData.length > 0) {
       autoTable(doc, {
-        head: [['Date', 'Employee', 'Department', 'Team', 'Manager', 'Task Details', 'Status']],
+        head: [[
+          'Department', 'Team', 'Reporting Manager', 'No of Resources',
+          'Tasks', 'Statuses', 'Reviewer'
+        ]],
         body: tableData,
         startY: currentY,
         styles: {
-          fontSize: 7,
-          cellPadding: 2,
-          overflow: 'linebreak',
+          fontSize: 8, // Adjusted font size
+          cellPadding: 3,
+          overflow: 'linebreak', // Important for tasks/statuses
           halign: 'left',
           valign: 'top'
         },
         headStyles: {
-          fillColor: [147, 51, 234],
+          fillColor: [147, 51, 234], // Purple
           textColor: [255, 255, 255],
           fontStyle: 'bold',
-          fontSize: 8
+          fontSize: 9
         },
         alternateRowStyles: {
-          fillColor: [248, 250, 252]
+          fillColor: [248, 250, 252] // Light gray
         },
         columnStyles: {
-          0: { cellWidth: 18 }, // Date
-          1: { cellWidth: 22 }, // Employee
-          2: { cellWidth: 22 }, // Department
-          3: { cellWidth: 18 }, // Team
-          4: { cellWidth: 22 }, // Manager
-          5: { cellWidth: 45 }, // Task Details
-          6: { cellWidth: 18 }  // Status
+          0: { cellWidth: 25 }, // Department
+          1: { cellWidth: 25 }, // Team
+          2: { cellWidth: 30 }, // Reporting Manager
+          3: { cellWidth: 20, halign: 'center' }, // No of Resource
+          4: { cellWidth: 'auto' }, // Tasks (auto to take remaining space)
+          5: { cellWidth: 25 }, // Statuses
+          6: { cellWidth: 25 }  // Reviewer
         },
-        theme: 'striped'
+        theme: 'striped',
+        didParseCell: function (data) { // To handle multiline text better
+            if (data.column.index === 4 || data.column.index === 5) { // Tasks and Statuses columns
+                if (typeof data.cell.raw === 'string') {
+                    // Ensure jspdf-autotable handles newlines correctly
+                    // No specific action needed here if using '\n' in cell content,
+                    // autotable should handle it with 'linebreak'.
+                }
+            }
+        }
       });
     }
     
@@ -2200,123 +2511,75 @@ const SummaryReport = () => {
           </motion.div>
           <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>Loading reports...</div>
         </div>
-      ) : reports.length === 0 ? (
+      ) : groupedReports.length === 0 ? (
         <div className="text-center py-12">
           <div className="text-6xl mb-4">📊</div>
-          <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-lg font-medium`}>No reports available</div>
-          <div className={`${isDark ? 'text-gray-500' : 'text-gray-400'} mt-2`}>Submit some reports to see the team summary</div>
+          <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-lg font-medium`}>No grouped summary reports available</div>
+          <div className={`${isDark ? 'text-gray-500' : 'text-gray-400'} mt-2`}>Try different filters or submit reports.</div>
         </div>
       ) : (
-        <div className="space-y-6">
-          {/* Summary Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[
-              { 
-                value: reports.length, 
-                label: "Total Reports", 
-                color: "blue",
-                icon: "📋"
-              },
-              { 
-                value: reports.reduce((acc, report) => acc + report.tasks.filter(task => task.status === 'Completed').length, 0), 
-                label: "Completed Tasks", 
-                color: "green",
-                icon: "✅"
-              },
-              { 
-                value: reports.reduce((acc, report) => acc + report.tasks.filter(task => task.status === 'WIP').length, 0), 
-                label: "WIP Tasks", 
-                color: "yellow",
-                icon: "⏳"
-              },
-              { 
-                value: reports.reduce((acc, report) => acc + report.tasks.filter(task => task.status === 'Delayed').length, 0), 
-                label: "Delayed Tasks", 
-                color: "red",
-                icon: "⚠️"
-              }
-            ].map((stat, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className={`bg-${stat.color}-50 ${
-                  isDark ? `bg-${stat.color}-900 bg-opacity-30` : ''
-                } rounded-xl p-4`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className={`text-2xl font-bold text-${stat.color}-800 ${
-                      isDark ? `text-${stat.color}-400` : ''
-                    }`}>
-                      {stat.value}
-                    </div>
-                    <div className={`text-sm text-${stat.color}-600 ${
-                      isDark ? `text-${stat.color}-500` : ''
-                    }`}>
-                      {stat.label}
-                    </div>
-                  </div>
-                  <div className="text-2xl">{stat.icon}</div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-
-          {/* Detailed Reports */}
-          <div className="space-y-4">
-            {reports.map((report, index) => (
-              <motion.div 
-                key={report.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className={`border ${
-                  isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-200'
-                } rounded-lg p-6`}
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h4 className="font-semibold text-lg">{report.employee_name}</h4>
-                    <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>
-                      {report.department} → {report.team} → {report.reporting_manager}
-                    </p>
-                    <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                      Date: {report.date}
-                    </p>
-                  </div>
-                  <span className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Submitted: {new Date(report.submitted_at).toLocaleDateString('en-IN')}
-                  </span>
-                </div>
-                
-                <div className="space-y-2">
-                  {report.tasks.map((task, idx) => (
-                    <motion.div 
-                      key={idx}
-                      whileHover={{ scale: 1.01 }}
-                      className={`flex justify-between items-start p-3 ${
-                        isDark ? 'bg-gray-600' : 'bg-gray-50'
-                      } rounded transition-all duration-200`}
-                    >
-                      <div className="flex-1">
-                        <p className="text-sm">{task.details}</p>
-                      </div>
-                      <span className={`px-2 py-1 rounded-full text-xs ml-4 ${
-                        task.status === 'Completed' ? 'bg-green-100 text-green-800' :
-                        task.status === 'WIP' ? 'bg-blue-100 text-blue-800' :
-                        task.status === 'Delayed' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {task.status}
-                      </span>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            ))}
-          </div>
+        <div className="overflow-x-auto shadow-lg rounded-lg">
+          <table className={`w-full min-w-max border-collapse border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+            <thead>
+              <tr className={isDark ? 'bg-gray-700' : 'bg-gray-100'}>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Department</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Team</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Reporting Manager</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>No of Resource</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Tasks</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Statuses</th>
+                <th className={`px-6 py-3 text-left text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>Reviewer</th>
+              </tr>
+            </thead>
+            <tbody className={isDark ? 'divide-y divide-gray-700' : 'divide-y divide-gray-200'}>
+              {groupedReports.map((group, index) => (
+                <motion.tr
+                  key={`${group.department}-${group.team}-${group.reporting_manager}-${index}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: index * 0.05 }}
+                  className={isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}
+                >
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>{group.department}</td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>{group.team}</td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>{group.reporting_manager}</td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm text-center ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>{group.no_of_resource}</td>
+                  <td className={`px-6 py-4 text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
+                    {group.tasks_list && group.tasks_list.length > 0 ? (
+                      <ul className="list-disc list-inside space-y-1">
+                        {group.tasks_list.map((task, i) => (
+                          <li key={i} className="truncate" title={task}>{task}</li> // Added truncate and title for long tasks
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-xs italic">No tasks</span>
+                    )}
+                  </td>
+                  <td className={`px-6 py-4 text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
+                    {group.statuses_list && group.statuses_list.length > 0 ? (
+                      <ul className="list-none list-inside space-y-1">
+                        {group.statuses_list.map((status, i) => (
+                          <li key={i}>
+                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                status === 'Completed' ? (isDark ? 'bg-green-700 text-green-100' : 'bg-green-100 text-green-800') :
+                                status === 'WIP' ? (isDark ? 'bg-blue-700 text-blue-100' :'bg-blue-100 text-blue-800') :
+                                status === 'Delayed' ? (isDark ? 'bg-red-700 text-red-100' :'bg-red-100 text-red-800') :
+                                (isDark ? 'bg-gray-600 text-gray-200' : 'bg-gray-100 text-gray-800')
+                              }`}>
+                              {status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-xs italic">No statuses</span>
+                    )}
+                  </td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'} border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>{group.reviewer || 'N/A'}</td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       <Footer />
@@ -2326,15 +2589,54 @@ const SummaryReport = () => {
 
 // Main App Component
 const App = () => {
-  const [isLogin, setIsLogin] = useState(true);
+  // Determine initial auth view based on URL
+  const getInitialAuthView = () => {
+    const queryParams = new URLSearchParams(window.location.search);
+    if (queryParams.has('token')) { // Check for the 'token' query parameter for reset password page
+      return 'resetPassword';
+    }
+    if (window.location.pathname.includes('/forgot-password')) { // Simple path check
+        return 'forgotPassword';
+    }
+    return 'login'; // Default
+  };
+
+  const [authView, setAuthView] = useState(getInitialAuthView); // 'login', 'signup', 'forgotPassword', 'resetPassword'
   const [activeSection, setActiveSection] = useState('welcome');
+
+  // Effect to update authView if URL changes (e.g. user navigates back/forward)
+  useEffect(() => {
+    const handlePopState = () => {
+      setAuthView(getInitialAuthView());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+
+  // Functions to switch auth views
+  const switchToLogin = () => {
+    window.history.pushState({}, '', '/');
+    setAuthView('login');
+  };
+  const switchToSignup = () => {
+    window.history.pushState({}, '', '/signup'); // Example, adjust if needed
+    setAuthView('signup');
+  };
+  const switchToForgotPassword = () => {
+    window.history.pushState({}, '', '/forgot-password');
+    setAuthView('forgotPassword');
+  };
+   // switchToResetPassword is not directly called by button, but by URL trigger.
 
   return (
     <ThemeProvider>
       <AuthProvider>
         <AppContent 
-          isLogin={isLogin} 
-          setIsLogin={setIsLogin}
+          authView={authView}
+          switchToLogin={switchToLogin}
+          switchToSignup={switchToSignup}
+          switchToForgotPassword={switchToForgotPassword}
           activeSection={activeSection}
           setActiveSection={setActiveSection}
         />
@@ -2343,9 +2645,25 @@ const App = () => {
   );
 };
 
-const AppContent = ({ isLogin, setIsLogin, activeSection, setActiveSection }) => {
+const AppContent = ({
+  authView,
+  switchToLogin,
+  switchToSignup,
+  switchToForgotPassword,
+  activeSection,
+  setActiveSection
+}) => {
   const { user, loading } = useAuth();
   const { isDark } = useTheme();
+
+  useEffect(() => {
+    // If user logs in while on a reset password page, redirect to welcome
+    if (user && (authView === 'forgotPassword' || authView === 'resetPassword')) {
+      switchToLogin(); // This will set authView to 'login', and then the user check will pass
+      setActiveSection('welcome'); // Ensure user is taken to dashboard
+    }
+  }, [user, authView, switchToLogin, setActiveSection]);
+
 
   if (loading) {
     return (
@@ -2371,15 +2689,27 @@ const AppContent = ({ isLogin, setIsLogin, activeSection, setActiveSection }) =>
   if (!user) {
     return (
       <AnimatePresence mode="wait">
-        {isLogin ? (
-          <Login key="login" onSwitchToSignup={() => setIsLogin(false)} />
-        ) : (
-          <Signup key="signup" onSwitchToLogin={() => setIsLogin(true)} />
+        {authView === 'login' && (
+          <Login
+            key="login"
+            onSwitchToSignup={switchToSignup}
+            onSwitchToForgotPassword={switchToForgotPassword}
+          />
+        )}
+        {authView === 'signup' && (
+          <Signup key="signup" onSwitchToLogin={switchToLogin} />
+        )}
+        {authView === 'forgotPassword' && (
+          <RequestPasswordResetPage key="forgotPassword" onSwitchToLogin={switchToLogin} />
+        )}
+        {authView === 'resetPassword' && (
+          <ResetPasswordPage key="resetPassword" onSwitchToLogin={switchToLogin} />
         )}
       </AnimatePresence>
     );
   }
 
+  // If user is logged in, show the main application
   return (
     <div className={`min-h-screen ${
       isDark 

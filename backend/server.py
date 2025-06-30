@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 import jwt
 import hashlib
@@ -210,6 +210,20 @@ class UserResponse(BaseModel):
     department: str = ""
     team: str = ""
 
+class PasswordResetToken(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    email: str
+    token: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    expires_at: datetime
+    used: bool = False
+
+class RequestPasswordReset(BaseModel):
+    email: str
+
+class ResetPassword(BaseModel):
+    token: str
+    new_password: str
+
 class Task(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     details: str
@@ -238,6 +252,18 @@ class WorkReportCreate(BaseModel):
 
 class WorkReportUpdate(BaseModel):
     tasks: List[Task]
+
+class GroupedSummaryReportItem(BaseModel):
+    department: str
+    team: str
+    reporting_manager: str
+    no_of_resource: int
+    tasks_list: List[str]
+    statuses_list: List[str]
+    reviewer: Optional[str] = None
+
+class GroupedSummaryReportResponse(BaseModel):
+    reports: List[GroupedSummaryReportItem]
 
 # Security setup
 security = HTTPBearer()
@@ -477,6 +503,84 @@ async def signup(user_data: UserCreate):
 @api_router.get("/auth/me")
 async def get_current_user_info(current_user: UserResponse = Depends(get_current_user)):
     return current_user
+
+# Placeholder for email sending function
+async def send_password_reset_email(email: str, token: str):
+    # In a real application, you would use an email library (e.g., fastapi-mail, sendgrid, etc.)
+    # For now, we'll just print it to the console for development
+    reset_link = f"http://localhost:3000/reset-password?token={token}" # Assuming frontend runs on port 3000
+    print(f"Password reset link for {email}: {reset_link}")
+    # Simulate email sending delay
+    # import asyncio
+    # await asyncio.sleep(1) # Uncomment if you want to simulate network latency
+
+@api_router.post("/auth/request-password-reset")
+async def request_password_reset(data: RequestPasswordReset):
+    user = await db.users.find_one({"email": data.email})
+    if user:
+        # Invalidate previous tokens for this user
+        await db.password_reset_tokens.update_many(
+            {"email": data.email, "used": False},
+            {"$set": {"used": True, "expires_at": datetime.now(IST) - timedelta(seconds=1)}} # Expire immediately
+        )
+
+        # Generate new token
+        token_expiry_minutes = 15 # Token valid for 15 minutes
+        expires_at = datetime.now(IST) + timedelta(minutes=token_expiry_minutes)
+
+        reset_token_data = PasswordResetToken(
+            email=data.email,
+            expires_at=expires_at
+        )
+        await db.password_reset_tokens.insert_one(reset_token_data.dict())
+
+        try:
+            await send_password_reset_email(data.email, reset_token_data.token)
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {data.email}: {e}")
+            # Even if email fails, don't reveal it to the user to prevent enumeration
+            # Log the error and proceed as if successful to the client
+
+    # Always return a generic message to prevent email enumeration attacks
+    return {"message": "If an account with that email exists, a password reset link has been sent."}
+
+@api_router.post("/auth/reset-password")
+async def reset_password(data: ResetPassword):
+    from datetime import timedelta # Moved import here to avoid conflict if not used elsewhere initially
+
+    token_data = await db.password_reset_tokens.find_one(
+        {"token": data.token, "used": False, "expires_at": {"$gt": datetime.now(IST)}}
+    )
+
+    if not token_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset token."
+        )
+
+    user = await db.users.find_one({"email": token_data["email"]})
+    if not user:
+        # This case should ideally not happen if token is valid, but good for robustness
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User associated with token not found."
+        )
+
+    # Update user's password
+    new_password_hash = hash_password(data.new_password)
+    await db.users.update_one(
+        {"email": token_data["email"]},
+        {"$set": {"password_hash": new_password_hash}}
+    )
+
+    # Mark token as used
+    await db.password_reset_tokens.update_one(
+        {"token": data.token},
+        {"$set": {"used": True}}
+    )
+
+    return {"message": "Password has been reset successfully."}
+
 
 @api_router.get("/departments")
 async def get_departments():
@@ -783,6 +887,115 @@ async def get_managers():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Managers service temporarily unavailable"
         )
+
+@api_router.get("/summary-reports-grouped", response_model=GroupedSummaryReportResponse)
+async def get_summary_reports_grouped(
+    current_user: UserResponse = Depends(get_current_user),
+    department: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None
+):
+    # Base query for fetching reports
+    query: Dict[str, Any] = {}
+    if department and department != "All Departments" and department != "":
+        query["department"] = department
+
+    date_filter: Dict[str, str] = {}
+    if from_date:
+        date_filter["$gte"] = from_date
+    if to_date:
+        date_filter["$lte"] = to_date
+    if date_filter:
+        query["date"] = date_filter
+
+    # Fetch all relevant reports first
+    all_reports_cursor = db.work_reports.find(query)
+    all_reports = await all_reports_cursor.to_list(length=None)
+
+    if not all_reports:
+        return GroupedSummaryReportResponse(reports=[])
+
+    # Structure for aggregation:
+    # Key: tuple (department, team, reporting_manager)
+    # Value: Dict { employees: set_of_employee_emails, tasks_list: [], statuses_list: [] }
+    grouped_data: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+
+    target_reporting_managers = [
+        "Atia Latif", "Siddharth Gautam", "Gurram Saikiran", "Akhilesh Mishra",
+        "Anant Tiwari", "Alimpan Banerjee", "Himani Sehgal", "Pawan Beniwal",
+        "Aditya Pandit", "Challa Sravya", "Sabavat Eshwar", "S S Manoharan",
+        "T. Pardhasaradhi", "Aakanksha Tandon", "P. Srinath Rao", "Madhunisha",
+        "Apoorva Singh", "Keerthana Sampath", "Bapan Kumar Chanda", "Tejaswini Ch",
+        "Nikash Kumar", "Bhawna Shraddha"
+    ]
+
+    # This will store reports submitted BY the managers themselves, to find their reviewer
+    reports_by_managers_themselves: Dict[str, Any] = {}
+
+
+    for report in all_reports:
+        report_manager = report.get("reporting_manager")
+        employee_email = report.get("employee_email") # Assuming employee_email is stored
+        employee_name = report.get("employee_name")
+
+        # Check if the report is submitted BY one of the target managers (for reviewer lookup)
+        if employee_name in target_reporting_managers and report_manager in ["Anant Tiwari", "Alimpan Banerjee"]:
+            # If this manager submitted multiple reports selecting a reviewer, keep the latest one
+            if employee_name not in reports_by_managers_themselves or \
+               report["submitted_at"] > reports_by_managers_themselves[employee_name]["submitted_at"]:
+                reports_by_managers_themselves[employee_name] = report
+
+
+        # Only process reports FOR the target reporting managers for the summary
+        if report_manager not in target_reporting_managers:
+            continue
+
+        group_key = (
+            report.get("department", "N/A"),
+            report.get("team", "N/A"),
+            report_manager # Already checked this is a target manager
+        )
+
+        if group_key not in grouped_data:
+            grouped_data[group_key] = {
+                "employees": set(), # Store employee emails or names for unique count
+                "tasks_list": [],
+                "statuses_list": [],
+                "reviewer": None
+            }
+
+        # Add employee to the set for unique count (using email for uniqueness)
+        if employee_email: # Make sure employee_email exists
+            grouped_data[group_key]["employees"].add(employee_email)
+
+        for task in report.get("tasks", []):
+            grouped_data[group_key]["tasks_list"].append(task.get("details", "N/A"))
+            grouped_data[group_key]["statuses_list"].append(task.get("status", "N/A"))
+
+    # Assign reviewer to each group
+    for group_key_tuple, data_dict in grouped_data.items():
+        manager_name_for_group = group_key_tuple[2] # This is the reporting_manager of the group
+        if manager_name_for_group in reports_by_managers_themselves:
+            # The reviewer is who this manager reported to
+            data_dict["reviewer"] = reports_by_managers_themselves[manager_name_for_group].get("reporting_manager")
+
+    result_reports: List[GroupedSummaryReportItem] = []
+    for key, data in grouped_data.items():
+        result_reports.append(
+            GroupedSummaryReportItem(
+                department=key[0],
+                team=key[1],
+                reporting_manager=key[2],
+                no_of_resource=len(data["employees"]),
+                tasks_list=data["tasks_list"],
+                statuses_list=data["statuses_list"],
+                reviewer=data.get("reviewer") # Use .get() for safety
+            )
+        )
+
+    result_reports.sort(key=lambda x: (x.department, x.team, x.reporting_manager))
+
+    return GroupedSummaryReportResponse(reports=result_reports)
 
 # Include the router in the main app
 app.include_router(api_router)
